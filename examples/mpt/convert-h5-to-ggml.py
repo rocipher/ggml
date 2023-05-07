@@ -39,7 +39,7 @@ if len(sys.argv) > 2:
 
 
 tokenizer = AutoTokenizer.from_pretrained(dir_model)
-model = AutoModelForCausalLM.from_pretrained(dir_model, low_cpu_mem_usage=True)
+model = AutoModelForCausalLM.from_pretrained(dir_model, low_cpu_mem_usage=True, trust_remote_code=True)
 #print (model)
 
 #print(tokenizer.encode('I believe the meaning of life is'))
@@ -54,11 +54,11 @@ print(hparams)
 
 fout.write(struct.pack("i", 0x67676d6c)) # magic: ggml in hex
 fout.write(struct.pack("i", hparams["vocab_size"]))
-fout.write(struct.pack("i", hparams["max_position_embeddings"]))
-fout.write(struct.pack("i", hparams["hidden_size"]))
-fout.write(struct.pack("i", hparams["num_attention_heads"]))
-fout.write(struct.pack("i", hparams["num_hidden_layers"]))
-fout.write(struct.pack("i", int(hparams["rotary_pct"]*(hparams["hidden_size"]//hparams["num_attention_heads"]))))
+fout.write(struct.pack("i", hparams["max_seq_len"]))
+fout.write(struct.pack("i", hparams["d_model"]))
+fout.write(struct.pack("i", hparams["n_heads"]))
+fout.write(struct.pack("i", hparams["n_layers"]))
+fout.write(struct.pack("i", 0)); // TODO: is that correct?
 fout.write(struct.pack("i", ftype))
 
 # TODO: temporary hack to not deal with implementing the tokenizer
