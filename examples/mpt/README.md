@@ -2,7 +2,7 @@
 
 **NOTE: This implementation attempt DOES NOT WORK (outputs gibberish during inference), most probably because it does not include
 the required port of the [modeling_mpt.py](https://github.com/mosaicml/llm-foundry/blob/3e16277b73e1cadb8409f6cd62dd7ea9610d0311/llmfoundry/models/mpt/modeling_mpt.py)
-from MosaicML's repository.**
+from MosaicML's repository. I'm pretty sure RoPE must be replaced by ALiBi somehow (using the alibi op which has been [recently implemented in ggml](https://github.com/ggerganov/llama.cpp/issues/1137)), probably more.**
 
 The GGML conversion and quantization parts seem to work.
 
