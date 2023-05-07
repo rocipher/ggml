@@ -14,15 +14,15 @@
 #include <iostream>
 #include <unistd.h>
 
-// default hparams (StableLM 3B)
+// default hparams
 struct mpt_hparams {
-    int32_t n_vocab = 50257;
-    int32_t n_ctx   = 4096;
-    int32_t n_embd  = 4096;
-    int32_t n_head  = 32;
-    int32_t n_layer = 16;
-    int32_t n_rot   = 32; // rotary_pct * (n_embd / n_head)
-    int32_t ftype   = 1;
+    int32_t n_vocab = 50432; // tokenizer.vocab_size
+    int32_t n_ctx   = 2048; // model.config.max_seq_len
+    int32_t n_embd  = 4096; // model.config.d_model
+    int32_t n_head  = 32; // model.config.n_heads
+    int32_t n_layer = 32; // model.config.n_layers
+    int32_t n_rot   = 0; // TODO: do we need it? I found nor refs to RoPE in MPT code
+    int32_t ftype   = GGML_FTYPE_MOSTLY_F16;
 };
 
 struct mpt_layer {
@@ -220,13 +220,11 @@ bool mpt_model_load(const std::string & fname, mpt_model & model, gpt_vocab & vo
         //model.lmh_b  = ggml_new_tensor_1d(ctx, GGML_TYPE_F32, n_vocab);
 
         // map by name
-        model.tensors["gpt_neox.embed_in.weight"] = model.wte;
+        model.tensors["transformer.wte.weight"] = model.wte;
 
-        model.tensors["gpt_neox.final_layer_norm.weight"] = model.ln_f_g;
-        model.tensors["gpt_neox.final_layer_norm.bias"]   = model.ln_f_b;
+        model.tensors["transformer.norm_f.weight"] = model.ln_f_g;
 
         model.tensors["embed_out.weight"] = model.lmh_g;
-        //model.tensors["lm_head.bias"]   = model.lmh_b;
 
         for (int i = 0; i < n_layer; ++i) {
             auto & layer = model.layers[i];
@@ -250,23 +248,21 @@ bool mpt_model_load(const std::string & fname, mpt_model & model, gpt_vocab & vo
             layer.c_mlp_proj_b    = ggml_new_tensor_1d(ctx, GGML_TYPE_F32,   n_embd);
 
             // map by name
-            model.tensors["gpt_neox.layers." + std::to_string(i) + ".input_layernorm.weight"] = layer.ln_1_g;
-            model.tensors["gpt_neox.layers." + std::to_string(i) + ".input_layernorm.bias"]   = layer.ln_1_b;
 
-            model.tensors["gpt_neox.layers." + std::to_string(i) + ".attention.query_key_value.weight"] = layer.c_attn_attn_w;
-            model.tensors["gpt_neox.layers." + std::to_string(i) + ".attention.query_key_value.bias"]   = layer.c_attn_attn_b;
+            // unmapped: attention.rotary_emb, mlp.act
+            // TODO: why are there no bias tensors in the checkpoint of mpt-7b-storywriter?...
 
-            model.tensors["gpt_neox.layers." + std::to_string(i) + ".attention.dense.weight"] = layer.c_attn_proj_w;
-            model.tensors["gpt_neox.layers." + std::to_string(i) + ".attention.dense.bias"]   = layer.c_attn_proj_b;
+            model.tensors["transformer.blocks." + std::to_string(i) + ".norm_1.weight"] = layer.ln_1_g;
 
-            model.tensors["gpt_neox.layers." + std::to_string(i) + ".post_attention_layernorm.weight"] = layer.ln_2_g;
-            model.tensors["gpt_neox.layers." + std::to_string(i) + ".post_attention_layernorm.bias"]   = layer.ln_2_b;
+            model.tensors["transformer.blocks." + std::to_string(i) + ".attn.Wqkv.weight"] = layer.c_attn_attn_w;
 
-            model.tensors["gpt_neox.layers." + std::to_string(i) + ".mlp.dense_h_to_4h.weight"] = layer.c_mlp_fc_w;
-            model.tensors["gpt_neox.layers." + std::to_string(i) + ".mlp.dense_h_to_4h.bias"]   = layer.c_mlp_fc_b;
+            model.tensors["transformer.blocks." + std::to_string(i) + ".attn.out_proj.weight"] = layer.c_attn_proj_w;
 
-            model.tensors["gpt_neox.layers." + std::to_string(i) + ".mlp.dense_4h_to_h.weight"] = layer.c_mlp_proj_w;
-            model.tensors["gpt_neox.layers." + std::to_string(i) + ".mlp.dense_4h_to_h.bias"]   = layer.c_mlp_proj_b;
+            model.tensors["transformer.blocks." + std::to_string(i) + ".norm_2.weight"] = layer.ln_1_g;
+
+            model.tensors["transformer.blocks." + std::to_string(i) + ".ffn.up_proj.weight"] = layer.c_mlp_fc_w;
+
+            model.tensors["transformer.blocks." + std::to_string(i) + ".ffn.down_proj.weight"] = layer.c_mlp_proj_w;
         }
     }
 
@@ -433,11 +429,10 @@ bool mpt_eval(
             {
                 cur = ggml_norm(ctx0, inpL);
 
-                cur = ggml_add(ctx0,
+                cur = 
                         ggml_mul(ctx0,
                             ggml_repeat(ctx0, model.layers[il].ln_1_g, cur),
-                            cur),
-                        ggml_repeat(ctx0, model.layers[il].ln_1_b, cur));
+                            cur);
             }
 
             // compute QKV
@@ -446,15 +441,14 @@ bool mpt_eval(
                         model.layers[il].c_attn_attn_w,
                         cur);
 
-                cur = ggml_add(ctx0,
-                        ggml_repeat(ctx0, model.layers[il].c_attn_attn_b, cur),
-                        cur);
             }
 
             struct ggml_tensor * Qcur = ggml_cont(ctx0, ggml_view_3d(ctx0, cur, n_embd/n_head, n_head, N, cur->nb[1]/n_head, cur->nb[1], 0*sizeof(float)*n_embd/n_head));
             struct ggml_tensor * Kcur = ggml_cont(ctx0, ggml_view_3d(ctx0, cur, n_embd/n_head, n_head, N, cur->nb[1]/n_head, cur->nb[1], 1*sizeof(float)*n_embd/n_head));
             struct ggml_tensor * Vcur = ggml_cont(ctx0, ggml_view_3d(ctx0, cur, n_embd/n_head, n_head, N, cur->nb[1]/n_head, cur->nb[1], 2*sizeof(float)*n_embd/n_head));
 
+
+            // TODO: maybe should remove these ggml_rope calls since n_rot=0? it doesn't help fix output, though
             // using mode = 2 for GPT-NeoX mode
             Qcur = ggml_rope(ctx0, Qcur, n_past, n_rot, 2);
             Kcur = ggml_rope(ctx0, Kcur, n_past, n_rot, 2);
@@ -527,7 +521,6 @@ bool mpt_eval(
                         model.layers[il].c_attn_proj_w,
                         cur);
 
-                cur = ggml_add(ctx0, ggml_repeat(ctx0, model.layers[il].c_attn_proj_b, cur), cur);
             }
         }
 
@@ -541,20 +534,16 @@ bool mpt_eval(
             {
                 cur = ggml_norm(ctx0, inpL);
 
-                cur = ggml_add(ctx0,
+                cur = 
                     ggml_mul(ctx0,
                         ggml_repeat(ctx0, model.layers[il].ln_2_g, cur),
-                        cur),
-                    ggml_repeat(ctx0, model.layers[il].ln_2_b, cur));
+                        cur);
             }
 
             cur = ggml_mul_mat(ctx0,
                     model.layers[il].c_mlp_fc_w,
                     cur);
 
-            cur = ggml_add(ctx0,
-                    ggml_repeat(ctx0, model.layers[il].c_mlp_fc_b, cur),
-                    cur);
 
             // GELU activation
             cur = ggml_gelu(ctx0, cur);
@@ -565,9 +554,6 @@ bool mpt_eval(
                     model.layers[il].c_mlp_proj_w,
                     cur);
 
-            cur = ggml_add(ctx0,
-                    ggml_repeat(ctx0, model.layers[il].c_mlp_proj_b, cur),
-                    cur);
         }
 
         // layer input + FF
@@ -582,11 +568,10 @@ bool mpt_eval(
         inpL = ggml_norm(ctx0, inpL);
 
         // inpL = ln_f_g*inpL + ln_f_b
-        inpL = ggml_add(ctx0,
+        inpL = 
                 ggml_mul(ctx0,
                     ggml_repeat(ctx0, model.ln_f_g, inpL),
-                    inpL),
-                ggml_repeat(ctx0, model.ln_f_b, inpL));
+                    inpL);
     }
 
     // lm_head
@@ -631,7 +616,7 @@ int main(int argc, char ** argv) {
     const int64_t t_main_start_us = ggml_time_us();
 
     gpt_params params;
-    params.model = "models/stablelm-base-alpha-3b/ggml-model-f16.bin";
+    params.model = "models/mpt-7b/ggml-model-f16.bin";
 
     if (gpt_params_parse(argc, argv, params) == false) {
         return 1;
