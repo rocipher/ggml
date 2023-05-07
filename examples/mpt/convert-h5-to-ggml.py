@@ -58,7 +58,7 @@ fout.write(struct.pack("i", hparams["max_seq_len"]))
 fout.write(struct.pack("i", hparams["d_model"]))
 fout.write(struct.pack("i", hparams["n_heads"]))
 fout.write(struct.pack("i", hparams["n_layers"]))
-fout.write(struct.pack("i", 0)); // TODO: is that correct?
+fout.write(struct.pack("i", 0)); # MPT uses ALiBi, not RoPE
 fout.write(struct.pack("i", ftype))
 
 # TODO: temporary hack to not deal with implementing the tokenizer
