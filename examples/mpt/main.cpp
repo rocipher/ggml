@@ -258,7 +258,7 @@ bool mpt_model_load(const std::string & fname, mpt_model & model, gpt_vocab & vo
 
             model.tensors["transformer.blocks." + std::to_string(i) + ".attn.out_proj.weight"] = layer.c_attn_proj_w;
 
-            model.tensors["transformer.blocks." + std::to_string(i) + ".norm_2.weight"] = layer.ln_1_g;
+            model.tensors["transformer.blocks." + std::to_string(i) + ".norm_2.weight"] = layer.ln_2_g;
 
             model.tensors["transformer.blocks." + std::to_string(i) + ".ffn.up_proj.weight"] = layer.c_mlp_fc_w;
 
