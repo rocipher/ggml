@@ -13,14 +13,14 @@
 #include <vector>
 #include <regex>
 
-// default hparams (StableLM 3B)
+// default hparams
 struct mpt_hparams {
-    int32_t n_vocab = 50257;
-    int32_t n_ctx   = 4096;
+    int32_t n_vocab = 50432;
+    int32_t n_ctx   = 2048;
     int32_t n_embd  = 4096;
     int32_t n_head  = 32;
-    int32_t n_layer = 16;
-    int32_t n_rot   = 32; // 0.25 * (n_embd / n_head)
+    int32_t n_layer = 32;
+    int32_t n_rot   = 0;
     int32_t ftype   = 1;
 };
 
@@ -118,7 +118,7 @@ bool mpt_model_quantize(const std::string & fname_inp, const std::string & fname
 }
 
 // usage:
-//  ./stablelm2-quantize models/stablelm2-117M/ggml-model.bin models/stablelm2-117M/ggml-model-quant.bin type
+//  ./mpt-quantize models/mpt-7B/ggml-model.bin models/mpt-7B/ggml-model-quant.bin type
 //
 int main(int argc, char ** argv) {
     if (argc != 4) {
