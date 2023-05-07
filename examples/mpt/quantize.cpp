@@ -14,7 +14,7 @@
 #include <regex>
 
 // default hparams (StableLM 3B)
-struct stablelm_hparams {
+struct mpt_hparams {
     int32_t n_vocab = 50257;
     int32_t n_ctx   = 4096;
     int32_t n_embd  = 4096;
@@ -25,7 +25,7 @@ struct stablelm_hparams {
 };
 
 // quantize a model
-bool stablelm_model_quantize(const std::string & fname_inp, const std::string & fname_out, ggml_ftype ftype) {
+bool mpt_model_quantize(const std::string & fname_inp, const std::string & fname_out, ggml_ftype ftype) {
     gpt_vocab vocab;
 
     printf("%s: loading model from '%s'\n", __func__, fname_inp.c_str());
@@ -54,7 +54,7 @@ bool stablelm_model_quantize(const std::string & fname_inp, const std::string & 
         fout.write((char *) &magic, sizeof(magic));
     }
 
-    stablelm_hparams hparams;
+    mpt_hparams hparams;
 
     // load hparams
     {
@@ -147,7 +147,7 @@ int main(int argc, char ** argv) {
     {
         const int64_t t_start_us = ggml_time_us();
 
-        if (!stablelm_model_quantize(fname_inp, fname_out, ggml_ftype(ftype))) {
+        if (!mpt_model_quantize(fname_inp, fname_out, ggml_ftype(ftype))) {
             fprintf(stderr, "%s: failed to quantize model from '%s'\n", __func__, fname_inp.c_str());
             return 1;
         }
