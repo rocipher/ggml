@@ -14,20 +14,22 @@
 #include <vector>
 
 // default hparams (Falcon 7B)
-// TODO add n_head_kv to support 40B
 struct falcon_hparams {
     int32_t n_vocab = 65024;
     int32_t n_ctx   = 2048;
     int32_t n_embd  = 4544;
     int32_t n_head  = 71;
+    int32_t n_head_kv = 1;
     int32_t n_layer = 32;
     int32_t ftype   = 1;
 };
 
 struct falcon_layer {
     // normalization
-    struct ggml_tensor* attention_norm;
-    struct ggml_tensor* attention_norm_b;
+    struct ggml_tensor* input_layernorm;
+    struct ggml_tensor* input_layernorm_b;
+    struct ggml_tensor* attention_norm;    // Falcon-40B only
+    struct ggml_tensor* attention_norm_b;  // Falcon-40B only
 
     // attention
     struct ggml_tensor* query_key_value;
@@ -83,17 +85,19 @@ bool falcon_model_load(const std::string & fname, falcon_model & model, gpt_voca
         fin.read((char *) &hparams.n_vocab, sizeof(hparams.n_vocab));
         fin.read((char *) &hparams.n_embd,  sizeof(hparams.n_embd));
         fin.read((char *) &hparams.n_head,  sizeof(hparams.n_head));
+        fin.read((char *) &hparams.n_head_kv, sizeof(hparams.n_head_kv));
         fin.read((char *) &hparams.n_layer, sizeof(hparams.n_layer));
         fin.read((char *) &hparams.ftype,   sizeof(hparams.ftype));
 
         const int32_t qntvr = hparams.ftype / GGML_QNT_VERSION_FACTOR;
 
-        printf("%s: n_vocab = %d\n", __func__, hparams.n_vocab);
-        printf("%s: n_embd  = %d\n", __func__, hparams.n_embd);
-        printf("%s: n_head  = %d\n", __func__, hparams.n_head);
-        printf("%s: n_layer = %d\n", __func__, hparams.n_layer);
-        printf("%s: ftype   = %d\n", __func__, hparams.ftype);
-        printf("%s: qntvr   = %d\n", __func__, qntvr);
+        printf("%s: n_vocab   = %d\n", __func__, hparams.n_vocab);
+        printf("%s: n_embd    = %d\n", __func__, hparams.n_embd);
+        printf("%s: n_head    = %d\n", __func__, hparams.n_head);
+        printf("%s: n_head_kv = %d\n", __func__, hparams.n_head_kv);
+        printf("%s: n_layer   = %d\n", __func__, hparams.n_layer);
+        printf("%s: ftype     = %d\n", __func__, hparams.ftype);
+        printf("%s: qntvr     = %d\n", __func__, qntvr);
 
         hparams.ftype %= GGML_QNT_VERSION_FACTOR;
     }
@@ -136,6 +140,7 @@ bool falcon_model_load(const std::string & fname, falcon_model & model, gpt_voca
 
         const int n_embd = hparams.n_embd;
         const int n_head = hparams.n_head;
+        const int n_head_kv = hparams.n_head_kv;
         const int n_layer = hparams.n_layer;
         const int n_ctx = hparams.n_ctx;
         const int n_ff = 4 * model.hparams.n_embd;
@@ -152,13 +157,22 @@ bool falcon_model_load(const std::string & fname, falcon_model & model, gpt_voca
 
         ctx_size +=
             n_layer *
-            (n_embd * ggml_type_sizef(GGML_TYPE_F32));  // attention_norm
+            (n_embd * ggml_type_sizef(GGML_TYPE_F32));  // input_layernorm
         ctx_size +=
             n_layer *
-            (n_embd * ggml_type_sizef(GGML_TYPE_F32));  // attention_norm_b
+            (n_embd * ggml_type_sizef(GGML_TYPE_F32));  // input_layernorm_b
 
-        ctx_size += n_layer * (n_embd * (n_embd + 2 * (n_embd / n_head)) *
-                               ggml_type_sizef(wtype));  // query_key_value
+        if (n_head_kv > 1) { // Falcon-40B
+            ctx_size +=
+                n_layer *
+                (n_embd * ggml_type_sizef(GGML_TYPE_F32));  // attention_norm
+            ctx_size +=
+                n_layer *
+                (n_embd * ggml_type_sizef(GGML_TYPE_F32));  // attention_norm_b
+        }
+
+        ctx_size += n_layer * n_embd * (n_head_kv * 2 + n_head) * head_dim *
+                               ggml_type_sizef(wtype);  // query_key_value
         ctx_size += n_layer * (n_embd * n_embd * ggml_type_sizef(wtype));  // wo
 
         ctx_size +=
@@ -171,9 +185,9 @@ bool falcon_model_load(const std::string & fname, falcon_model & model, gpt_voca
         ctx_size +=
             n_layer * (n_ff * n_embd * ggml_type_sizef(wtype));  // ffn_down
 
-        ctx_size += n_ctx * n_layer * head_dim *
+        ctx_size += n_ctx * n_layer * n_head_kv * head_dim *
                     ggml_type_sizef(GGML_TYPE_F32);  // memory_k
-        ctx_size += n_ctx * n_layer * head_dim *
+        ctx_size += n_ctx * n_layer * n_head_kv * head_dim *
                     ggml_type_sizef(GGML_TYPE_F32);  // memory_v
 
         ctx_size += (5 + 10 * n_layer) * 256;  // object overhead TODO:
@@ -201,9 +215,11 @@ bool falcon_model_load(const std::string & fname, falcon_model & model, gpt_voca
 
         const int n_embd = hparams.n_embd;
         const int n_head = hparams.n_head;
+        const int n_head_kv = hparams.n_head_kv;
         const int n_layer = hparams.n_layer;
         const int n_ff = 4 * model.hparams.n_embd;
         const int n_vocab = hparams.n_vocab;
+        const int head_dim = hparams.n_embd / hparams.n_head;
 
         model.layers.resize(n_layer);
 
@@ -224,24 +240,42 @@ bool falcon_model_load(const std::string & fname, falcon_model & model, gpt_voca
         for (int i = 0; i < n_layer; ++i) {
             auto& layer = model.layers[i];
 
-            layer.attention_norm =
+            layer.input_layernorm =
                 ggml_new_tensor_1d(ctx, GGML_TYPE_F32, n_embd);
-            layer.attention_norm_b =
+            layer.input_layernorm_b =
                 ggml_new_tensor_1d(ctx, GGML_TYPE_F32, n_embd);
+
+            if (n_head_kv > 1) { // Falcon-40B
+                layer.attention_norm =
+                    ggml_new_tensor_1d(ctx, GGML_TYPE_F32, n_embd);
+                layer.attention_norm_b =
+                    ggml_new_tensor_1d(ctx, GGML_TYPE_F32, n_embd);
+            }
 
             // query_key_value shape for config.multi_query == True:
             layer.query_key_value = ggml_new_tensor_2d(
-                ctx, wtype, n_embd, n_embd + 2 * (n_embd / n_head));
+                ctx, wtype, n_embd, (n_head_kv * 2 + n_head) * head_dim);
             layer.wo = ggml_new_tensor_2d(ctx, wtype, n_embd, n_embd);
 
             layer.ffn_up = ggml_new_tensor_2d(ctx, wtype, n_embd, n_ff);
             layer.ffn_down = ggml_new_tensor_2d(ctx, wtype, n_ff, n_embd);
 
             // map by name
+            // Falcon-7B:
             model.tensors["transformer.h." + std::to_string(i) +
-                          ".input_layernorm.weight"] = layer.attention_norm;
+                          ".input_layernorm.weight"] = layer.input_layernorm;
             model.tensors["transformer.h." + std::to_string(i) +
-                          ".input_layernorm.bias"] = layer.attention_norm_b;
+                          ".input_layernorm.bias"] = layer.input_layernorm_b;
+
+            // Falcon-40B:
+            model.tensors["transformer.h." + std::to_string(i) +
+                          ".ln_mlp.weight"] = layer.input_layernorm;
+            model.tensors["transformer.h." + std::to_string(i) +
+                          ".ln_mlp.bias"] = layer.input_layernorm_b;
+            model.tensors["transformer.h." + std::to_string(i) +
+                          ".ln_attn.weight"] = layer.attention_norm;
+            model.tensors["transformer.h." + std::to_string(i) +
+                          ".ln_attn.bias"] = layer.attention_norm_b;
 
             model.tensors["transformer.h." + std::to_string(i) +
                           ".self_attention.query_key_value.weight"] =
@@ -262,13 +296,14 @@ bool falcon_model_load(const std::string & fname, falcon_model & model, gpt_voca
 
         const int n_layer = hparams.n_layer;
         const int n_ctx   = hparams.n_ctx;
+        const int n_head_kv = hparams.n_head_kv;
         const int head_dim = hparams.n_embd / hparams.n_head;
 
         const int64_t n_mem      = n_layer*n_ctx;
         const int64_t n_elements = head_dim*n_mem;
 
-        model.memory_k = ggml_new_tensor_1d(ctx, GGML_TYPE_F32, n_elements);
-        model.memory_v = ggml_new_tensor_1d(ctx, GGML_TYPE_F32, n_elements);
+        model.memory_k = ggml_new_tensor_1d(ctx, GGML_TYPE_F32, n_head_kv * n_elements);
+        model.memory_v = ggml_new_tensor_1d(ctx, GGML_TYPE_F32, n_head_kv * n_elements);
 
         const size_t memory_size = ggml_nbytes(model.memory_k) + ggml_nbytes(model.memory_v);
 
@@ -378,6 +413,7 @@ bool falcon_eval(
     const int n_layer = hparams.n_layer;
     const int n_ctx   = hparams.n_ctx;
     const int n_head  = hparams.n_head;
+    const int n_head_kv = hparams.n_head_kv;
     const int n_vocab = hparams.n_vocab;
     const size_t head_dim = n_embd / n_head;
 
@@ -420,7 +456,10 @@ bool falcon_eval(
 
     // wte
     struct ggml_tensor * inpL = ggml_get_rows(ctx0, model.tok_embeddings, embd);
-    struct ggml_tensor* repeat_dummy = ggml_new_tensor_3d(ctx0, inpL->type, head_dim, N + n_past, n_head);
+    struct ggml_tensor* repeat_dummy = ggml_new_tensor_4d(ctx0, inpL->type, head_dim, N + n_past, n_head, 1);
+
+    ggml_type wtype = ggml_ftype_to_ggml_type((ggml_ftype) (model.hparams.ftype));
+    const int sizeof_wtype = ggml_type_sizef(wtype);
 
     for (int il = 0; il < n_layer; ++il) {
         struct ggml_tensor * cur;
@@ -430,7 +469,15 @@ bool falcon_eval(
 
         // self-attention
         {
-            {
+            layernorm_output = ggml_norm(ctx0, inpL);
+
+            layernorm_output = ggml_add(ctx0,
+                    ggml_mul(ctx0,
+                        ggml_repeat(ctx0, model.layers[il].input_layernorm, layernorm_output),
+                        layernorm_output),
+                    ggml_repeat(ctx0, model.layers[il].input_layernorm_b, layernorm_output));
+
+            if (n_head_kv > 1) { // Falcon-40B only
                 cur = ggml_norm(ctx0, inpL);
 
                 cur = ggml_add(ctx0,
@@ -439,71 +486,120 @@ bool falcon_eval(
                             cur),
                         ggml_repeat(ctx0, model.layers[il].attention_norm_b, cur));
             }
-            layernorm_output = cur;
+            else {
+                cur = layernorm_output;
+            }
 
             // compute QKV
             cur = ggml_mul_mat(ctx0, model.layers[il].query_key_value, cur);
 
-            size_t fused_qkv_row_nb =
-                (n_embd + 2 * (n_embd / n_head)) * sizeof(float);
+            struct ggml_tensor* Qcur = ggml_view_4d(
+                ctx0, cur, head_dim, n_head / n_head_kv, n_head_kv, N,
+                head_dim * sizeof_wtype,
+                head_dim * (n_head / n_head_kv + 2) * sizeof_wtype,
+                head_dim * (n_head / n_head_kv + 2) * n_head_kv * sizeof_wtype,
+                0);
 
-            struct ggml_tensor* Qcur =
-                ggml_view_3d(ctx0, cur, head_dim, n_head, N,
-                             head_dim * sizeof(float), fused_qkv_row_nb, 0);
+            struct ggml_tensor* Kcur = ggml_view_4d(
+                ctx0, cur, head_dim, 1, N, n_head_kv,
+                head_dim * sizeof_wtype,
+                head_dim * (n_head / n_head_kv + 2) * sizeof_wtype,
+                head_dim * (n_head / n_head_kv + 2) * N * sizeof_wtype,
+                head_dim * (n_head / n_head_kv) * sizeof_wtype);
 
-            struct ggml_tensor* Kcur = ggml_view_3d(
-                ctx0, cur, head_dim, 1, N, head_dim * sizeof(float),
-                fused_qkv_row_nb, n_embd * sizeof(float));
+            struct ggml_tensor* Vcur = ggml_view_4d(
+                ctx0, cur, head_dim, 1, N, n_head_kv,
+                head_dim * sizeof_wtype,
+                head_dim * (n_head / n_head_kv + 2) * sizeof_wtype,
+                head_dim * (n_head / n_head_kv + 2) * N * sizeof_wtype,
+                head_dim * (n_head / n_head_kv + 1) * sizeof_wtype);
 
-            struct ggml_tensor* Vcur = ggml_view_3d(
-                ctx0, cur, head_dim, 1, N, head_dim * sizeof(float),
-                fused_qkv_row_nb, (n_embd + head_dim) * sizeof(float));
+            // TODO: The crazy piecewise copying below works (well, until GGML_MAX_NODES is hit),
+            // but it surely cannot remain so in production.
+            // As for the necessity of it, consider for example n_head_kv=2
+            // and n_head=4, head_dim=64. Unfortunately with that config we have addressing like
+            //  offset = i * 512 + kv_group * 256 + head_in_group * 64
+            // required to collect each individual query vector in Qcur.
+            // I don't think it can be expressed using view or reshape.
+            // Maybe the GGML conversion could do something to alleviate it
+            // so that we can get rid of it.
 
+            struct ggml_tensor * Q =
+                ggml_new_tensor_3d(ctx0, wtype, head_dim, n_head, N);
+
+            for (int i = 0; i < N; i++) {
+                for (int group = 0; group < n_head_kv; group++) {
+                    for (int member = 0; member < n_head / n_head_kv; member++) {
+                        size_t src_offset =
+                            (i * (n_head + 2 * n_head_kv) * head_dim +
+                            group * (n_head / n_head_kv + 2) * head_dim +
+                            member * head_dim) * sizeof_wtype;
+
+                        size_t dst_offset =
+                            (Q->nb[1] * (group * n_head_kv + member) +
+                            Q->nb[2] * i);
+
+                        struct ggml_tensor* src = ggml_view_1d(
+                            ctx0, Qcur, head_dim, src_offset);
+
+                        struct ggml_tensor* dst = ggml_view_1d(
+                            ctx0, Q, head_dim, dst_offset);
+
+                        ggml_build_forward_expand(&gf, ggml_cpy(ctx0, src, dst));
+                    }
+                }
+            }
+            
             // using mode = 2 for neox mode
-            Qcur = ggml_rope_inplace(ctx0, Qcur, n_past, head_dim, 2);
+            Q = ggml_rope_inplace(ctx0, Q, n_past, head_dim, 2);
             Kcur = ggml_rope_inplace(ctx0, Kcur, n_past, head_dim, 2);
 
             // store key and value to memory
             {
                 struct ggml_tensor* k = ggml_view_1d(
-                    ctx0, model.memory_k, N * head_dim,
-                    (ggml_element_size(model.memory_k) * head_dim) *
+                    ctx0, model.memory_k, N * n_head_kv * head_dim,
+                    (ggml_element_size(model.memory_k) * n_head_kv * head_dim) *
                         (il * n_ctx + n_past));
                 struct ggml_tensor* v = ggml_view_1d(
-                    ctx0, model.memory_v, N * head_dim,
-                    (ggml_element_size(model.memory_v) * head_dim) *
+                    ctx0, model.memory_v, N * n_head_kv * head_dim,
+                    (ggml_element_size(model.memory_v) * n_head_kv * head_dim) *
                         (il * n_ctx + n_past));
 
                 ggml_build_forward_expand(&gf, ggml_cpy(ctx0, Kcur, k));
                 ggml_build_forward_expand(&gf, ggml_cpy(ctx0, Vcur, v));
             }
 
-            // Q = Qcur.contiguous().view(n_embd/n_head, n_head, N).permute(0, 2, 1, 3)
-            struct ggml_tensor * Q =
-                ggml_permute(ctx0,
-                        Qcur,
-                        0, 2, 1, 3);
-
             struct ggml_tensor* K = ggml_permute(
                 ctx0,
                 ggml_reshape_3d(
                     ctx0,
-                    ggml_view_1d(ctx0, model.memory_k, (n_past + N) * head_dim,
+                    ggml_view_1d(ctx0, model.memory_k, (n_past + N) * n_head_kv * head_dim,
                                  il * n_ctx *
                                      ggml_element_size(model.memory_k) *
+                                     n_head_kv *
                                      head_dim),
-                    head_dim, 1, n_past + N),
+                    head_dim, n_head_kv, n_past + N),
                 0, 2, 1, 3);
 
             // K * Q
+
+            // TODO Unfortunately this ggml_repeat does not do what we need it to do:
+            // [ K1, K2 ] will be broadcast into [ [K1, K2], [K1, K2] ], while we actually
+            // need them to become [ [K1, K1], [K2, K2] ] ... And I suppose there will be same
+            // problem with V below as well.
+            // Here too perhaps GGML conversion could do some preprocessing to obtain
+            // a more GGML-friendly memory format.
+
             K = ggml_cont(ctx0, ggml_repeat(ctx0, K, repeat_dummy));
+            Q = ggml_permute(ctx0, Q, 0, 2, 1, 3);
+
             struct ggml_tensor * KQ = ggml_mul_mat(ctx0, K, Q);
 
             // KQ_scaled = KQ / sqrt(n_embd/n_head)
             struct ggml_tensor * KQ_scaled =
                 ggml_scale_inplace(ctx0,
                         KQ,
-                        ggml_new_f32(ctx0, 1.0f/sqrt(float(n_embd)/n_head))
+                        ggml_new_f32(ctx0, 1.0f/sqrt(float(head_dim)))
                         );
 
             // KQ_masked = mask_past(KQ_scaled)
@@ -515,15 +611,16 @@ bool falcon_eval(
             // V_trans = Vmem.view(n_embd/n_head, n_head, n_past + N).permute(1, 2, 0, 3).contiguous()
             struct ggml_tensor* V = ggml_permute(
                 ctx0,
-                ggml_reshape_3d(
+                ggml_reshape_4d(
                     ctx0,
-                    ggml_view_1d(ctx0, model.memory_v, (n_past + N) * head_dim,
+                    ggml_view_1d(ctx0, model.memory_v, (n_past + N) * n_head_kv * head_dim,
                                  il * n_ctx *
                                      ggml_element_size(model.memory_v) *
+                                     n_head_kv *
                                      head_dim),
-                    head_dim, 1, n_past + N),
-                0, 2, 1, 3);
-            
+                    head_dim, 1, n_head_kv, n_past + N),
+                0, 3, 2, 1);
+
             V = ggml_cont(ctx0, ggml_transpose(ctx0, ggml_repeat(ctx0, V, repeat_dummy)));
 
             // KQV = transpose(V) * KQ_soft_max
