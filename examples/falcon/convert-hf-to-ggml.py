@@ -79,6 +79,7 @@ fout.write(struct.pack("i", hparams["hidden_size"]))
 fout.write(struct.pack("i", hparams["n_head"]))
 fout.write(struct.pack("i", hparams["n_head_kv"] if "n_head_kv" in hparams else 1))
 fout.write(struct.pack("i", hparams["n_layer"]))
+fout.write(struct.pack("i", 40 if "n_head_kv" in hparams else 7))
 fout.write(struct.pack("i", ftype))
 
 reverse_vocab = {id: encoded_tok for encoded_tok, id in tokenizer.vocab.items()}
