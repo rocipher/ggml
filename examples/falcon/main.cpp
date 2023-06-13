@@ -468,7 +468,7 @@ bool falcon_eval(
     struct ggml_tensor * inpL = ggml_get_rows(ctx0, model.tok_embeddings, embd);
     struct ggml_tensor* repeat_dummy = ggml_new_tensor_4d(ctx0, inpL->type, head_dim, N + n_past, n_head, 1);
 
-    ggml_type wtype = ggml_ftype_to_ggml_type((ggml_ftype) (model.hparams.ftype));
+    ggml_type wtype = GGML_TYPE_F32;
     const int sizeof_wtype = ggml_type_sizef(wtype);
 
     for (int il = 0; il < n_layer; ++il) {
