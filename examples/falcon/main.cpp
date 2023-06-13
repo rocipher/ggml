@@ -355,7 +355,6 @@ bool falcon_model_load(const std::string & fname, falcon_model & model, gpt_voca
             }
 
             auto tensor = model.tensors[name.data()];
-fprintf(stderr, "LOOKING AT %s\n", name.data());
             if (ggml_nelements(tensor) != nelements) {
                 fprintf(stderr, "%s: tensor '%s' has wrong size in model file\n", __func__, name.data());
                 return false;
