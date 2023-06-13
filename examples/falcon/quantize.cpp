@@ -18,7 +18,9 @@ struct falcon_hparams {
     int32_t n_vocab = 65024;
     int32_t n_embd  = 4544;
     int32_t n_head  = 71;
+    int32_t n_head_kv = 1;
     int32_t n_layer = 32;
+    int32_t version = 7; // 7 for Falcon-7B, 40 for Falcon-40B
     int32_t ftype   = 1;
 };
 
@@ -59,7 +61,9 @@ bool falcon_model_quantize(const std::string & fname_inp, const std::string & fn
         finp.read((char *) &hparams.n_vocab, sizeof(hparams.n_vocab));
         finp.read((char *) &hparams.n_embd,  sizeof(hparams.n_embd));
         finp.read((char *) &hparams.n_head,  sizeof(hparams.n_head));
+        finp.read((char *) &hparams.n_head_kv, sizeof(hparams.n_head_kv));
         finp.read((char *) &hparams.n_layer, sizeof(hparams.n_layer));
+        finp.read((char *) &hparams.version, sizeof(hparams.version));
         finp.read((char *) &hparams.ftype,   sizeof(hparams.ftype));
 
         const int32_t qntvr_src =    hparams.ftype / GGML_QNT_VERSION_FACTOR;
@@ -68,7 +72,9 @@ bool falcon_model_quantize(const std::string & fname_inp, const std::string & fn
         printf("%s: n_vocab     = %d\n", __func__, hparams.n_vocab);
         printf("%s: n_embd      = %d\n", __func__, hparams.n_embd);
         printf("%s: n_head      = %d\n", __func__, hparams.n_head);
+        printf("%s: n_head_kv   = %d\n", __func__, hparams.n_head_kv);
         printf("%s: n_layer     = %d\n", __func__, hparams.n_layer);
+        printf("%s: version     = %d\n", __func__, hparams.version);
         printf("%s: ftype (src) = %d\n", __func__, hparams.ftype);
         printf("%s: qntvr (src) = %d\n", __func__, qntvr_src);
         printf("%s: ftype (dst) = %d\n", __func__, ftype_dst);
@@ -77,7 +83,9 @@ bool falcon_model_quantize(const std::string & fname_inp, const std::string & fn
         fout.write((char *) &hparams.n_vocab, sizeof(hparams.n_vocab));
         fout.write((char *) &hparams.n_embd,  sizeof(hparams.n_embd));
         fout.write((char *) &hparams.n_head,  sizeof(hparams.n_head));
+        fout.write((char *) &hparams.n_head_kv, sizeof(hparams.n_head_kv));
         fout.write((char *) &hparams.n_layer, sizeof(hparams.n_layer));
+        fout.write((char *) &hparams.version, sizeof(hparams.version));
         fout.write((char *) &ftype_dst,       sizeof(ftype_dst));
     }
 
