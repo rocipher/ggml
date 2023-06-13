@@ -329,6 +329,8 @@ extern "C" {
         GGML_OP_MAP_BINARY,
 
         GGML_OP_COUNT,
+
+        GGML_OP_REPEAT2,
     };
 
 
@@ -634,6 +636,11 @@ extern "C" {
     // if a is the same shape as b, and a is not parameter, return a
     // otherwise, return a new tensor: repeat(a) to fit in b
     GGML_API struct ggml_tensor * ggml_repeat(
+            struct ggml_context * ctx,
+            struct ggml_tensor  * a,
+            struct ggml_tensor  * b);
+
+    GGML_API struct ggml_tensor * ggml_repeat2(
             struct ggml_context * ctx,
             struct ggml_tensor  * a,
             struct ggml_tensor  * b);
