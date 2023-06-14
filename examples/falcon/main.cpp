@@ -466,7 +466,7 @@ bool falcon_eval(
 
     // wte
     struct ggml_tensor * inpL = ggml_get_rows(ctx0, model.tok_embeddings, embd);
-    struct ggml_tensor* repeat_dummy = ggml_new_tensor_4d(ctx0, inpL->type, head_dim, N + n_past, n_head, 1);
+    struct ggml_tensor* repeat_dummy = ggml_new_tensor_3d(ctx0, inpL->type, head_dim, N + n_past, n_head);
 
     ggml_type wtype = GGML_TYPE_F32;
     const int sizeof_wtype = ggml_type_sizef(wtype);
@@ -501,20 +501,8 @@ bool falcon_eval(
             }
 
             // compute QKV
+
             cur = ggml_mul_mat(ctx0, model.layers[il].query_key_value, cur);
-
-            // Below is the "qkv" view which splits up QKV into kv groups,
-            // each group containing n_head / n_head_kv query heads,
-            // one key head and one value head (hence + 2). We don't really
-            // need this view as we access Q,K,V through cur directly by
-            // applying offsets and strides.
-
-            /*struct ggml_tensor* qkv = ggml_view_4d(
-                ctx0, cur, head_dim, n_head / n_head_kv + 2, n_head_kv, N,
-                head_dim * sizeof_wtype,
-                head_dim * (n_head / n_head_kv + 2) * sizeof_wtype,
-                head_dim * (n_head / n_head_kv + 2) * n_head_kv * sizeof_wtype,
-                0);*/
 
             // Note that the strides for Kcur, Vcur are set up so that the
             // resulting views are misaligned with the tensor's storage
@@ -525,59 +513,27 @@ bool falcon_eval(
             // trickery when trying to accurately dump these views for
             // debugging.
 
-            struct ggml_tensor* Kcur = ggml_view_4d(
-                ctx0, cur, head_dim, 1, n_head_kv, N,
+            struct ggml_tensor * Qcur = ggml_view_3d(
+                ctx0, cur, head_dim, n_head, N,
                 head_dim * sizeof_wtype,
-                head_dim * (n_head / n_head_kv + 2) * sizeof_wtype,
-                head_dim * (n_head / n_head_kv + 2) * n_head_kv * sizeof_wtype,
-                head_dim * (n_head / n_head_kv) * sizeof_wtype);
+                head_dim * (n_head + 2 * n_head_kv) * sizeof_wtype,
+                0);
 
-            struct ggml_tensor* Vcur = ggml_view_4d(
-                ctx0, cur, head_dim, 1, n_head_kv, N,
+            struct ggml_tensor * Kcur = ggml_view_3d(
+                ctx0, cur, head_dim, n_head_kv, N,
                 head_dim * sizeof_wtype,
-                head_dim * (n_head / n_head_kv + 2) * sizeof_wtype,
-                head_dim * (n_head / n_head_kv + 2) * n_head_kv * sizeof_wtype,
-                head_dim * (n_head / n_head_kv + 1) * sizeof_wtype);
+                head_dim * (n_head + 2 * n_head_kv) * sizeof_wtype,
+                head_dim * n_head * sizeof_wtype);
 
-            // TODO: The crazy piecewise copying below works (well, until GGML_MAX_NODES is hit),
-            // but it surely cannot remain so in production.
-            // As for the necessity of it, consider for example n_head_kv=2
-            // and n_head=4, head_dim=64. Unfortunately with that config we have addressing like
-            //  offset = i * 512 + kv_group * 256 + head_in_group * 64
-            // required to collect each individual query vector in Qcur.
-            // I don't think it can be expressed using view or reshape.
-            // Maybe the GGML conversion could do something to alleviate it
-            // so that we can get rid of it.
+            struct ggml_tensor * Vcur = ggml_view_3d(
+                ctx0, cur, head_dim, n_head_kv, N,
+                head_dim * sizeof_wtype,
+                head_dim * (n_head + 2 * n_head_kv) * sizeof_wtype,
+                head_dim * (n_head + n_head_kv) * sizeof_wtype);
 
-            struct ggml_tensor * Q =
-                ggml_new_tensor_3d(ctx0, wtype, head_dim, n_head, N);
-
-            for (int i = 0, qi = 0; i < N; i++, qi = 0) {
-                for (int group = 0; group < n_head_kv; group++) {
-                    for (int member = 0; member < n_head / n_head_kv; member++, qi++) {
-                        size_t src_offset =
-                            (i * (n_head + 2 * n_head_kv) * head_dim +
-                            group * (n_head / n_head_kv + 2) * head_dim +
-                            member * head_dim) * sizeof_wtype;
-
-                        size_t dst_offset = (Q->nb[1] * qi + Q->nb[2] * i);
-
-                        struct ggml_tensor* src = ggml_view_1d(
-                            ctx0, cur, head_dim, src_offset);
-
-                        struct ggml_tensor* dst = ggml_view_1d(
-                            ctx0, Q, head_dim, dst_offset);
-
-                        ggml_build_forward_expand(&gf, ggml_cpy(ctx0, src, dst));
-                    }
-                }
-            }
-            
             // using mode = 2 for neox mode
-            Q = ggml_rope_inplace(ctx0, Q, n_past, head_dim, 2);
-            Kcur = ggml_permute(ctx0, Kcur, 0, 1, 3, 2);
+            Qcur = ggml_rope_inplace(ctx0, Qcur, n_past, head_dim, 2);
             Kcur = ggml_rope_inplace(ctx0, Kcur, n_past, head_dim, 2);
-            Kcur = ggml_permute(ctx0, Kcur, 0, 1, 3, 2);
 
             // store key and value to memory
             {
@@ -594,7 +550,7 @@ bool falcon_eval(
                 ggml_build_forward_expand(&gf, ggml_cpy(ctx0, Vcur, v));
             }
 
-            struct ggml_tensor* K = ggml_permute(
+            struct ggml_tensor * K = ggml_permute(
                 ctx0,
                 ggml_reshape_3d(
                     ctx0,
@@ -609,8 +565,8 @@ bool falcon_eval(
             // K * Q
 
             K = ggml_cont(ctx0, ggml_repeat2(ctx0, K, repeat_dummy));
-            Q = ggml_permute(ctx0, Q, 0, 2, 1, 3);
 
+            struct ggml_tensor * Q = ggml_permute(ctx0, Qcur, 0, 2, 1, 3);
             struct ggml_tensor * KQ = ggml_mul_mat(ctx0, K, Q);
 
             // KQ_scaled = KQ / sqrt(n_embd/n_head)

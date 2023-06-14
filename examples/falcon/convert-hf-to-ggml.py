@@ -70,14 +70,17 @@ print("Loading model: ", model_name)
 model = AutoModelForCausalLM.from_pretrained(model_name, config=config, torch_dtype=torch.float16 if ftype == 1 else torch.float32, low_cpu_mem_usage=True, trust_remote_code=True)
 print("Model loaded: ", model_name)
 
+n_head = hparams["n_head"]
+n_head_kv = hparams["n_head_kv"] if "n_head_kv" in hparams else 1
+head_dim = hparams["hidden_size"] // n_head
 
 fname_out = dir_out + f"/ggml-model-{model_name.split('/')[-1]}-{ftype_str[ftype]}.bin"
 fout = open(fname_out, "wb")
 fout.write(struct.pack("i", 0x67676d6c)) # magic: ggml in hex
 fout.write(struct.pack("i", hparams["vocab_size"]))
 fout.write(struct.pack("i", hparams["hidden_size"]))
-fout.write(struct.pack("i", hparams["n_head"]))
-fout.write(struct.pack("i", hparams["n_head_kv"] if "n_head_kv" in hparams else 1))
+fout.write(struct.pack("i", n_head))
+fout.write(struct.pack("i", n_head_kv))
 fout.write(struct.pack("i", hparams["n_layer"]))
 fout.write(struct.pack("i", 40 if "n_head_kv" in hparams else 7))
 fout.write(struct.pack("i", ftype))
@@ -94,6 +97,25 @@ for i in range(hparams["vocab_size"]):
 list_vars = model.state_dict()
 for name in list_vars.keys():
     src = name
+
+    # The original query_key_value tensor contains n_head_kv "kv groups",
+    # each consisting of n_head/n_head_kv query weights followed by one key
+    # and one value weight (shared by all query heads in the kv group).
+    # This layout makes it a big pain to work with in GGML.
+    # So we rearrange them here,, so that we have n_head query weights
+    # followed by n_head_kv key weights followed by n_head_kv value weights,
+    # in contiguous fashion.
+
+    if "query_key_value" in src:
+        qkv = list_vars[src].view(
+            n_head_kv, n_head // n_head_kv + 2, head_dim, head_dim * n_head)
+
+        q = qkv[:, :-2 ].reshape(n_head * head_dim, head_dim * n_head)
+        k = qkv[:, [-2]].reshape(n_head_kv * head_dim, head_dim * n_head)
+        v = qkv[:, [-1]].reshape(n_head_kv * head_dim, head_dim * n_head)
+
+        list_vars[src] = torch.cat((q,k,v)).reshape_as(list_vars[src])
+
     data = list_vars[src].squeeze().numpy()
     data = data.astype(np.float32)
 
