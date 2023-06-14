@@ -552,17 +552,15 @@ bool falcon_eval(
             struct ggml_tensor * Q =
                 ggml_new_tensor_3d(ctx0, wtype, head_dim, n_head, N);
 
-            for (int i = 0; i < N; i++) {
+            for (int i = 0, qi = 0; i < N; i++, qi = 0) {
                 for (int group = 0; group < n_head_kv; group++) {
-                    for (int member = 0; member < n_head / n_head_kv; member++) {
+                    for (int member = 0; member < n_head / n_head_kv; member++, qi++) {
                         size_t src_offset =
                             (i * (n_head + 2 * n_head_kv) * head_dim +
                             group * (n_head / n_head_kv + 2) * head_dim +
                             member * head_dim) * sizeof_wtype;
 
-                        size_t dst_offset =
-                            (Q->nb[1] * (group * n_head_kv + member) +
-                            Q->nb[2] * i);
+                        size_t dst_offset = (Q->nb[1] * qi + Q->nb[2] * i);
 
                         struct ggml_tensor* src = ggml_view_1d(
                             ctx0, cur, head_dim, src_offset);
