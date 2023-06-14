@@ -198,6 +198,7 @@ bool falcon_model_load(const std::string & fname, falcon_model & model, gpt_voca
                     ggml_type_sizef(GGML_TYPE_F32);  // memory_v
 
         ctx_size += (5 + 10 * n_layer) * 256;  // object overhead TODO:
+        ctx_size += ((size_t)3) * 1024 * 1024 * 1024;
         printf("%s: ggml ctx size = %6.2f MB\n", __func__, ctx_size/(1024.0*1024.0));
     }
 
