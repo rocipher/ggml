@@ -154,51 +154,25 @@ bool falcon_model_load(const std::string & fname, falcon_model & model, gpt_voca
         const int n_vocab = hparams.n_vocab;
         const int head_dim = hparams.n_embd / hparams.n_head;
 
-        ctx_size +=
-            n_embd * n_vocab * ggml_type_sizef(wtype);  // tok_embeddings
+        ctx_size += ggml_sizeof_tensor_2d(wtype, n_embd, n_vocab);  // tok_embeddings
+        ctx_size += ggml_sizeof_tensor_1d(GGML_TYPE_F32, n_embd);  // output_norm
+        ctx_size += ggml_sizeof_tensor_1d(GGML_TYPE_F32, n_embd);  // output_norm_b
+        ctx_size += ggml_sizeof_tensor_2d(wtype, n_embd, n_vocab);  // lm_head
 
-        ctx_size += n_embd * ggml_type_sizef(GGML_TYPE_F32);  // output_norm
-        ctx_size += n_embd * ggml_type_sizef(GGML_TYPE_F32);  // output_norm_b
-
-        ctx_size += n_embd * n_vocab * ggml_type_sizef(wtype);  // lm_head
-
-        ctx_size +=
-            n_layer *
-            (n_embd * ggml_type_sizef(GGML_TYPE_F32));  // input_layernorm
-        ctx_size +=
-            n_layer *
-            (n_embd * ggml_type_sizef(GGML_TYPE_F32));  // input_layernorm_b
-
+        ctx_size += n_layer * ggml_sizeof_tensor_1d(GGML_TYPE_F32, n_embd);  // input_layernorm
+        ctx_size += n_layer * ggml_sizeof_tensor_1d(GGML_TYPE_F32, n_embd);  // input_layernorm_b
         if (hparams.version == 40) { // Falcon-40B
-            ctx_size +=
-                n_layer *
-                (n_embd * ggml_type_sizef(GGML_TYPE_F32));  // attention_norm
-            ctx_size +=
-                n_layer *
-                (n_embd * ggml_type_sizef(GGML_TYPE_F32));  // attention_norm_b
+            ctx_size += n_layer * ggml_sizeof_tensor_1d(GGML_TYPE_F32, n_embd);  // attention_norm
+            ctx_size += n_layer * ggml_sizeof_tensor_1d(GGML_TYPE_F32, n_embd);  // attention_norm_b
         }
+        ctx_size += n_layer * ggml_sizeof_tensor_2d(wtype, n_embd, (n_head_kv * 2 + n_head) * head_dim);  // query_key_value
+        ctx_size += n_layer * ggml_sizeof_tensor_2d(wtype, n_embd, n_embd);  // wo
+        ctx_size += n_layer * ggml_sizeof_tensor_2d(wtype, n_embd, n_ff);  // ffn_up
+        ctx_size += n_layer * ggml_sizeof_tensor_2d(wtype, n_ff, n_embd);  // ffn_down
+        
+        ctx_size += ggml_sizeof_tensor_1d(GGML_TYPE_F32, n_head_kv * head_dim * n_layer * n_ctx);  // memory_k
+        ctx_size += ggml_sizeof_tensor_1d(GGML_TYPE_F32, n_head_kv * head_dim * n_layer * n_ctx);  // memory_v
 
-        ctx_size += n_layer * n_embd * (n_head_kv * 2 + n_head) * head_dim *
-                               ggml_type_sizef(wtype);  // query_key_value
-        ctx_size += n_layer * (n_embd * n_embd * ggml_type_sizef(wtype));  // wo
-
-        ctx_size +=
-            n_layer * (n_embd * ggml_type_sizef(GGML_TYPE_F32));  // ffn_norm
-        ctx_size +=
-            n_layer * (n_embd * ggml_type_sizef(GGML_TYPE_F32));  // ffn_norm_b
-
-        ctx_size +=
-            n_layer * (n_ff * n_embd * ggml_type_sizef(wtype));  // ffn_up
-        ctx_size +=
-            n_layer * (n_ff * n_embd * ggml_type_sizef(wtype));  // ffn_down
-
-        ctx_size += n_ctx * n_layer * n_head_kv * head_dim *
-                    ggml_type_sizef(GGML_TYPE_F32);  // memory_k
-        ctx_size += n_ctx * n_layer * n_head_kv * head_dim *
-                    ggml_type_sizef(GGML_TYPE_F32);  // memory_v
-
-        ctx_size += (5 + 10 * n_layer) * 256;  // object overhead TODO:
-        ctx_size += ((size_t)3) * 1024 * 1024 * 1024;
         printf("%s: ggml ctx size = %6.2f MB\n", __func__, ctx_size/(1024.0*1024.0));
     }
 
