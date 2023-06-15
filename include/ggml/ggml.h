@@ -494,6 +494,12 @@ extern "C" {
             int64_t ne2,
             int64_t ne3);
 
+    // Size overestimates.
+    GGML_API size_t ggml_sizeof_tensor_1d(enum ggml_type type, int64_t ne0);
+    GGML_API size_t ggml_sizeof_tensor_2d(enum ggml_type type, int64_t ne0, int64_t ne1);
+    GGML_API size_t ggml_sizeof_tensor_3d(enum ggml_type type, int64_t ne0, int64_t ne1, int64_t ne2);
+    GGML_API size_t ggml_sizeof_tensor_4d(enum ggml_type type, int64_t ne0, int64_t ne1, int64_t ne2, int64_t ne3);
+
     GGML_API struct ggml_tensor * ggml_new_i32(struct ggml_context * ctx, int32_t value);
     GGML_API struct ggml_tensor * ggml_new_f32(struct ggml_context * ctx, float value);
 
