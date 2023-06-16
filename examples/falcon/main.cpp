@@ -61,7 +61,7 @@ struct falcon_model {
 
 // load the model's weights from a file
 bool falcon_model_load(const std::string & fname, falcon_model & model, gpt_vocab & vocab) {
-    printf("%s: loading model from '%s' - please wait ...\n", __func__, fname.c_str());
+    fprintf(stderr, "%s: loading model from '%s' - please wait ...\n", __func__, fname.c_str());
 
     auto fin = std::ifstream(fname, std::ios::binary);
     if (!fin) {
@@ -98,13 +98,13 @@ bool falcon_model_load(const std::string & fname, falcon_model & model, gpt_voca
 
         const int32_t qntvr = hparams.ftype / GGML_QNT_VERSION_FACTOR;
 
-        printf("%s: n_vocab   = %d\n", __func__, hparams.n_vocab);
-        printf("%s: n_embd    = %d\n", __func__, hparams.n_embd);
-        printf("%s: n_head    = %d\n", __func__, hparams.n_head);
-        printf("%s: n_head_kv = %d\n", __func__, hparams.n_head_kv);
-        printf("%s: n_layer   = %d\n", __func__, hparams.n_layer);
-        printf("%s: ftype     = %d\n", __func__, hparams.ftype);
-        printf("%s: qntvr     = %d\n", __func__, qntvr);
+        fprintf(stderr, "%s: n_vocab   = %d\n", __func__, hparams.n_vocab);
+        fprintf(stderr, "%s: n_embd    = %d\n", __func__, hparams.n_embd);
+        fprintf(stderr, "%s: n_head    = %d\n", __func__, hparams.n_head);
+        fprintf(stderr, "%s: n_head_kv = %d\n", __func__, hparams.n_head_kv);
+        fprintf(stderr, "%s: n_layer   = %d\n", __func__, hparams.n_layer);
+        fprintf(stderr, "%s: ftype     = %d\n", __func__, hparams.ftype);
+        fprintf(stderr, "%s: qntvr     = %d\n", __func__, qntvr);
 
         hparams.ftype %= GGML_QNT_VERSION_FACTOR;
     }
@@ -173,7 +173,7 @@ bool falcon_model_load(const std::string & fname, falcon_model & model, gpt_voca
         ctx_size += ggml_sizeof_tensor_1d(GGML_TYPE_F32, n_head_kv * head_dim * n_layer * n_ctx);  // memory_k
         ctx_size += ggml_sizeof_tensor_1d(GGML_TYPE_F32, n_head_kv * head_dim * n_layer * n_ctx);  // memory_v
 
-        printf("%s: ggml ctx size = %6.2f MB\n", __func__, ctx_size/(1024.0*1024.0));
+        fprintf(stderr, "%s: ggml ctx size = %6.2f MB\n", __func__, ctx_size/(1024.0*1024.0));
     }
 
     // create the ggml context
@@ -291,7 +291,7 @@ bool falcon_model_load(const std::string & fname, falcon_model & model, gpt_voca
 
         const size_t memory_size = ggml_nbytes(model.memory_k) + ggml_nbytes(model.memory_v);
 
-        printf("%s: memory_size = %8.2f MB, n_mem = %" PRId64 "\n", __func__, memory_size/1024.0/1024.0, n_mem);
+        fprintf(stderr, "%s: memory_size = %8.2f MB, n_mem = %" PRId64 "\n", __func__, memory_size/1024.0/1024.0, n_mem);
     }
 
     // load weights
@@ -299,7 +299,7 @@ bool falcon_model_load(const std::string & fname, falcon_model & model, gpt_voca
         int n_tensors = 0;
         size_t total_size = 0;
 
-        printf("%s: ", __func__);
+        fprintf(stderr, "%s: ", __func__);
 
         while (true) {
             int32_t n_dims;
@@ -343,7 +343,7 @@ bool falcon_model_load(const std::string & fname, falcon_model & model, gpt_voca
 
             // for debugging
             if (0) {
-                printf("%24s - [%5d, %5d], type = %6s, %6.2f MB, %9zu bytes\n", name.data(), ne[0], ne[1], ggml_type_name(ggml_type(ttype)), ggml_nbytes(tensor)/1024.0/1024.0, ggml_nbytes(tensor));
+                fprintf(stderr, "%24s - [%5d, %5d], type = %6s, %6.2f MB, %9zu bytes\n", name.data(), ne[0], ne[1], ggml_type_name(ggml_type(ttype)), ggml_nbytes(tensor)/1024.0/1024.0, ggml_nbytes(tensor));
             }
 
             const size_t bpe = ggml_type_size(ggml_type(ttype));
@@ -358,14 +358,14 @@ bool falcon_model_load(const std::string & fname, falcon_model & model, gpt_voca
 
             total_size += ggml_nbytes(tensor);
             if (++n_tensors % 8 == 0) {
-                printf(".");
+                fprintf(stderr, ".");
                 fflush(stdout);
             }
         }
 
-        printf(" done\n");
+        fprintf(stderr, " done\n");
 
-        printf("%s: model size = %8.2f MB / num tensors = %d\n", __func__, total_size/1024.0/1024.0, n_tensors);
+        fprintf(stderr, "%s: model size = %8.2f MB / num tensors = %d\n", __func__, total_size/1024.0/1024.0, n_tensors);
     }
 
     fin.close();
@@ -415,7 +415,7 @@ bool falcon_eval(
 
     if (mem_per_token > 0 && mem_per_token*N > buf_size) {
         const size_t buf_size_new = 1.1*(mem_per_token*N); // add 10% to account for ggml object overhead
-        //printf("\n%s: reallocating buffer from %zu to %zu bytes\n", __func__, buf_size, buf_size_new);
+        //fprintf(stderr, "\n%s: reallocating buffer from %zu to %zu bytes\n", __func__, buf_size, buf_size_new);
 
         // reallocate
         buf_size = buf_size_new;
@@ -656,7 +656,7 @@ bool falcon_eval(
     if (mem_per_token == 0) {
         mem_per_token = ggml_used_mem(ctx0)/N;
     }
-    //printf("used_mem = %zu\n", ggml_used_mem(ctx0));
+    //fprintf(stderr, "used_mem = %zu\n", ggml_used_mem(ctx0));
 
     ggml_free(ctx0);
 
@@ -679,7 +679,7 @@ int main(int argc, char ** argv) {
         params.seed = time(NULL);
     }
 
-    printf("%s: seed = %d\n", __func__, params.seed);
+    fprintf(stderr, "%s: seed = %d\n", __func__, params.seed);
 
     std::mt19937 rng(params.seed);
     if (params.prompt.empty()) {
@@ -717,11 +717,11 @@ int main(int argc, char ** argv) {
 
     params.n_predict = std::min(params.n_predict, model.hparams.n_ctx - (int) embd_inp.size());
 
-    printf("%s: number of tokens in prompt = %zu\n", __func__, embd_inp.size());
+    fprintf(stderr, "%s: number of tokens in prompt = %zu\n", __func__, embd_inp.size());
     for (int i = 0; i < embd_inp.size(); i++) {
-        printf("%s: token[%d] = %6d, %s\n", __func__, i, embd_inp[i], vocab.id_to_token.at(embd_inp[i]).c_str());
+        fprintf(stderr, "%s: token[%d] = %6d, %s\n", __func__, i, embd_inp[i], vocab.id_to_token.at(embd_inp[i]).c_str());
     }
-    printf("\n");
+    fprintf(stderr, "\n");
 
     std::vector<gpt_vocab::id> embd;
 
@@ -735,7 +735,7 @@ int main(int argc, char ** argv) {
             const int64_t t_start_us = ggml_time_us();
 
             if (!falcon_eval(model, params.n_threads, n_past, embd, logits, mem_per_token)) {
-                printf("Failed to predict\n");
+                fprintf(stderr, "Failed to predict\n");
                 return 1;
             }
 
@@ -792,12 +792,12 @@ int main(int argc, char ** argv) {
     {
         const int64_t t_main_end_us = ggml_time_us();
 
-        printf("\n\n");
-        printf("%s: mem per token = %8zu bytes\n", __func__, mem_per_token);
-        printf("%s:     load time = %8.2f ms\n", __func__, t_load_us/1000.0f);
-        printf("%s:   sample time = %8.2f ms\n", __func__, t_sample_us/1000.0f);
-        printf("%s:  predict time = %8.2f ms / %.2f ms per token\n", __func__, t_predict_us/1000.0f, t_predict_us/1000.0f/n_past);
-        printf("%s:    total time = %8.2f ms\n", __func__, (t_main_end_us - t_main_start_us)/1000.0f);
+        fprintf(stderr, "\n\n");
+        fprintf(stderr, "%s: mem per token = %8zu bytes\n", __func__, mem_per_token);
+        fprintf(stderr, "%s:     load time = %8.2f ms\n", __func__, t_load_us/1000.0f);
+        fprintf(stderr, "%s:   sample time = %8.2f ms\n", __func__, t_sample_us/1000.0f);
+        fprintf(stderr, "%s:  predict time = %8.2f ms / %.2f ms per token\n", __func__, t_predict_us/1000.0f, t_predict_us/1000.0f/n_past);
+        fprintf(stderr, "%s:    total time = %8.2f ms\n", __func__, (t_main_end_us - t_main_start_us)/1000.0f);
     }
 
     ggml_free(model.ctx);
